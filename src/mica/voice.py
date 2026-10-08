@@ -114,11 +114,16 @@ class SoundDeviceAudio:
 
     def play(self, audio, rate):
         # Own stream, no global queue or background playback surviving cancellation.
+        if getattr(self, "_playback_cancelled", False):
+            return
         stream = self.sd.OutputStream(device=self.settings.output_device, channels=1, samplerate=rate, dtype="float32")
+        self._playback_stream = stream
         try:
             stream.start()
             audio = self.np.asarray(audio, dtype="float32").reshape(-1, 1)
             for start in range(0, len(audio), 2048):
+                if getattr(self, "_playback_cancelled", False):
+                    return
                 stream.write(audio[start:start+2048])
             stream.stop()  # Drain only on successful playback.
         finally:
@@ -126,9 +131,19 @@ class SoundDeviceAudio:
                 stream.abort()  # Cancellation/errors discard queued device audio immediately.
             finally:
                 stream.close()
+                self._playback_stream = None
+
+    def begin_speech(self):
+        self._playback_cancelled = False
 
     def close(self):
-        pass  # Every device stream is scoped by a context manager.
+        self._playback_cancelled = True
+        stream = getattr(self, "_playback_stream", None)
+        if stream is not None:
+            try:
+                stream.abort()
+            except Exception:
+                pass  # Playback's finally block owns closing the stream.
 
 
 def asset_path(identity, offline, prepare=False):
@@ -332,6 +347,8 @@ class VoiceIO:
             return
         chunks = None
         try:
+            if hasattr(self.playback, "begin_speech"):
+                self.playback.begin_speech()
             state("Speaking — synthesizing and playing; Ctrl+C stops.")
             chunks = self.speech.synthesize(text)
             for audio, rate in chunks:
@@ -342,6 +359,9 @@ class VoiceIO:
         finally:
             if chunks is not None and hasattr(chunks, "close"):
                 chunks.close()
+
+    def start_stream(self):
+        return StreamingSpeech(self)
 
     def close(self):
         try:
@@ -361,3 +381,114 @@ def create_voice(settings, offline):
     except BaseException:
         audio.close()
         raise
+
+
+class SentenceChunks:
+    """Incremental sentence boundaries, retaining fenced code until it closes."""
+    def __init__(self):
+        self.pending = ""
+
+    def feed(self, piece):
+        self.pending += piece
+        chunks = []
+        start = 0
+        fence = None
+        for match in re.finditer(r"```|~~~|[.!?](?=\s|$)|\n", self.pending):
+            marker = match.group()
+            if marker in ("```", "~~~"):
+                if fence is None:
+                    fence = marker
+                elif fence == marker:
+                    fence = None
+            elif fence is None:
+                text = speech_text(self.pending[start:match.end()])
+                if text:
+                    chunks.append(text)
+                start = match.end()
+        self.pending = self.pending[start:]
+        return chunks
+
+    def finish(self):
+        text = speech_text(self.pending)
+        self.pending = ""
+        return [text] if text else []
+
+
+class StreamingSpeech:
+    """Bounded sentence producer/consumer; MLX speech stays in its own process."""
+    def __init__(self, voice, capacity=4):
+        import queue
+        self.voice = voice
+        self.queue = queue.Queue(maxsize=capacity)
+        self.stop = threading.Event()
+        self.cleanup_lock = threading.Lock()
+        self.error = None
+        self.chunks = SentenceChunks()
+        if hasattr(voice.playback, "begin_speech"):
+            voice.playback.begin_speech()
+        self.thread = threading.Thread(target=self._run, name="mica-speech")
+        self.thread.start()
+
+    def _run(self):
+        import queue
+        try:
+            while not self.stop.is_set():
+                try:
+                    text = self.queue.get(timeout=0.05)
+                except queue.Empty:
+                    continue
+                if text is None:
+                    return
+                audio_chunks = self.voice.speech.synthesize(text)
+                try:
+                    for audio, rate in audio_chunks:
+                        if self.stop.is_set():
+                            return
+                        self.voice.playback.play(audio, rate)
+                finally:
+                    if hasattr(audio_chunks, "close"):
+                        audio_chunks.close()
+        except BaseException as e:
+            if not self.stop.is_set():
+                self.error = e
+                self.stop.set()
+                self._close()
+
+    def _close(self):
+        with self.cleanup_lock:
+            self.voice.close()
+
+    def _submit(self, text):
+        import queue
+        while not self.stop.is_set():
+            try:
+                self.queue.put(text, timeout=0.05)
+                return
+            except queue.Full:
+                pass  # Bounded backpressure and interruptible waits.
+
+    def feed(self, piece):
+        for text in self.chunks.feed(piece):
+            self._submit(text)
+
+    def finish(self):
+        for text in self.chunks.finish():
+            self._submit(text)
+        self._submit(None)
+        while self.thread.is_alive():
+            self.thread.join(timeout=0.05)
+        if self.error is not None:
+            raise self.error
+
+    def cancel(self):
+        self.stop.set()
+        self.chunks.pending = ""
+        # Abort device buffers and kill uninterruptible inference before joining.
+        self._close()
+        while self.thread.is_alive():
+            self.thread.join(timeout=0.05)
+        while not self.queue.empty():
+            try:
+                self.queue.get_nowait()
+            except Exception:
+                break

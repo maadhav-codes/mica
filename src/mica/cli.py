@@ -340,15 +340,23 @@ def chat(
                 console.print(str(e), style="red", markup=False)
                 continue
             if from_voice:
-                console.print("Generating…", markup=False)
+                console.print("Generating and speaking sentences…", markup=False)
             console.print("Assistant> ", end="")
             output = []
             incomplete = False
             stream = engine.stream(tokens, settings)
+            speech_stream = None
             try:
+                if from_voice:
+                    try:
+                        speech_stream = voice_io.start_stream()
+                    except Exception as e:
+                        console.print(f"\nSpeech unavailable: {explain(e)}. Continuing text generation.", style="red", markup=False)
                 for piece in stream:
                     output.append(piece)
                     console.print(piece, end="", markup=False, highlight=False, soft_wrap=True)
+                    if speech_stream is not None:
+                        speech_stream.feed(piece)
             except KeyboardInterrupt:
                 incomplete = True
                 console.print("\n[cancelled]", markup=False)
@@ -359,12 +367,15 @@ def chat(
                 stream.close()
                 conversation.finish("".join(output), incomplete)
                 if incomplete:
+                    if speech_stream is not None:
+                        speech_stream.cancel()
                     engine.invalidate()
                 console.print()
-            if from_voice and not incomplete:
+            if speech_stream is not None and not incomplete:
                 try:
-                    voice_io.speak("".join(output), lambda state: console.print(state, markup=False))
+                    speech_stream.finish()
                 except KeyboardInterrupt:
+                    speech_stream.cancel()
                     console.print("Speech cancelled; completed text retained.")
                 except Exception as e:
                     console.print(f"Speech failed: {explain(e)}. Completed text retained.", style="red", markup=False)

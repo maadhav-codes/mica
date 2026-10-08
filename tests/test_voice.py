@@ -49,7 +49,7 @@ class Adapters:
         self.closed += 1
 
 
-def run_chat(monkeypatch, tmp_path, inputs, adapter=None, generation_fail=None, enable_fail=False, args=()):
+def run_chat(monkeypatch, tmp_path, inputs, adapter=None, generation_fail=None, enable_fail=False, args=(), pieces=None, between_pieces=None):
     import mica.cli as cli
     import mica.voice as voice
     import prompt_toolkit
@@ -67,7 +67,10 @@ def run_chat(monkeypatch, tmp_path, inputs, adapter=None, generation_fail=None, 
             invalidations.append(True)
         def stream(self, tokens, settings):
             contexts.append(tokens)
-            yield "**answer**"
+            for piece in pieces or ["**answer**"]:
+                yield piece
+                if between_pieces:
+                    between_pieces()
             if generation_fail:
                 raise generation_fail
         def close(self):
@@ -302,3 +305,114 @@ def test_failed_worker_start_releases_both_pipe_ends(monkeypatch):
     with pytest.raises(OSError, match="Cannot spawn"):
         LocalSpeech(VoiceSettings(), ("whisper", "kokoro", "voice"))
     assert events == ["child", "process", "parent"]
+
+
+def test_sentence_chunker_handles_token_splits_and_fenced_code():
+    from mica.voice import SentenceChunks
+    chunks = SentenceChunks()
+    assert chunks.feed("Hello wor") == []
+    assert chunks.feed("ld. Next?") == ["Hello world.", "Next?"]
+    assert chunks.feed("\n```python\nprint('secret.')\n") == []
+    assert chunks.feed("```\nLast words") == ["Code omitted."]
+    assert chunks.finish() == ["Last words"]
+
+
+def test_streaming_speech_starts_before_generation_finishes_and_keeps_order():
+    import threading
+    from mica.voice import StreamingSpeech
+    started = threading.Event()
+    adapter = Adapters()
+    original = adapter.synthesize
+    def synthesize(text):
+        started.set()
+        yield from original(text)
+    adapter.synthesize = synthesize
+    voice = VoiceIO(VoiceSettings(), adapter, adapter, adapter)
+    pipeline = StreamingSpeech(voice, capacity=2)
+    try:
+        pipeline.feed("First sentence.")
+        assert started.wait(2), "Speech waited for generation completion"
+        pipeline.feed(" Second sentence! Remaining tail")
+        pipeline.finish()
+        assert adapter.spoken == ["First sentence.", "Second sentence!", "Remaining tail"]
+        assert adapter.played == [[1], [2]] * 3
+    finally:
+        pipeline.cancel()
+    assert not pipeline.thread.is_alive()
+
+
+def test_streaming_cancel_discards_queued_sentences_and_stale_audio():
+    import threading
+    from mica.voice import StreamingSpeech
+    started, released = threading.Event(), threading.Event()
+    adapter = Adapters()
+    def synthesize(text):
+        adapter.spoken.append(text)
+        started.set()
+        assert released.wait(2)
+        yield [99], 24000
+    adapter.synthesize = synthesize
+    adapter.close = released.set
+    voice = VoiceIO(VoiceSettings(), adapter, adapter, adapter)
+    pipeline = StreamingSpeech(voice, capacity=2)
+    pipeline.feed("First.")
+    assert started.wait(2)
+    pipeline.feed(" Second. Third.")
+    assert pipeline.queue.qsize() <= 2
+    pipeline.cancel()
+    assert not pipeline.thread.is_alive()
+    assert adapter.spoken == ["First."] and not adapter.played
+    assert pipeline.queue.empty()
+
+
+def test_streaming_failure_discards_audio_without_interrupting_text_producer():
+    import threading
+    from mica.voice import StreamingSpeech
+    failed = threading.Event()
+    adapter = Adapters()
+    def synthesize(text):
+        failed.set()
+        raise ChatError("TTS failure")
+        yield
+    adapter.synthesize = synthesize
+    voice = VoiceIO(VoiceSettings(), adapter, adapter, adapter)
+    pipeline = StreamingSpeech(voice)
+    pipeline.feed("First.")
+    assert failed.wait(2)
+    pipeline.feed(" Text continues. Final tail")  # No error propagated into LLM generation.
+    with pytest.raises(ChatError, match="TTS failure"):
+        pipeline.finish()
+    assert not adapter.played and not pipeline.thread.is_alive()
+
+
+def test_cli_speaks_while_generator_is_still_active(monkeypatch, tmp_path):
+    import threading
+    started = threading.Event()
+    adapter = Adapters()
+    original = adapter.play
+    def play(audio, rate):
+        original(audio, rate)
+        started.set()
+    adapter.play = play
+    def between():
+        assert started.wait(2), "Generation must not finish before first speech"
+    saved = tmp_path / "streamed.json"
+    run_chat(monkeypatch, tmp_path, ["", f"/save {saved}", "/exit"], adapter,
+        args=["--io-mode", "voice"], pieces=["First. ", "Second!", " Tail"], between_pieces=between)
+    assert adapter.spoken == ["First.", "Second!", "Tail"]
+    assert Conversation.load(saved).messages[-1]["content"] == "First. Second! Tail"
+
+
+def test_cli_interrupt_after_first_sentence_stops_future_speech(monkeypatch, tmp_path):
+    import threading
+    played = threading.Event()
+    adapter = Adapters()
+    adapter.play = lambda audio, rate: played.set()
+    def between():
+        assert played.wait(2)
+        raise KeyboardInterrupt
+    saved = tmp_path / "partial.json"
+    run_chat(monkeypatch, tmp_path, ["", f"/save {saved}", "/mode text", "typed", "/exit"], adapter,
+        args=["--io-mode", "voice"], pieces=["First. ", "Never spoken."], between_pieces=between)
+    assert adapter.spoken == ["First."]
+    assert Conversation.load(saved).messages[-1]["incomplete"] is True
