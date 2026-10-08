@@ -343,3 +343,18 @@ def test_interactive_state_changes_do_not_reuse_stale_cache(tmp_path, monkeypatc
     assert saved.messages[0]["content"] == "four"
     assert saved.model == "org/first"
     assert Settings.load().last_model == "org/next"
+
+
+@pytest.mark.parametrize("python_version", [(3, 10), (3, 11), (3, 12), (3, 13)])
+def test_platform_requires_python_312_only(monkeypatch, python_version):
+    import mica.config as config
+    monkeypatch.setattr(config.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(config.platform, "machine", lambda: "arm64")
+    monkeypatch.setattr(config.platform, "mac_ver", lambda: ("15.8.1", (), ""))
+    monkeypatch.setattr(config.subprocess, "run", lambda *a, **kw: SimpleNamespace(stdout="0"))
+    monkeypatch.setattr(config.sys, "version_info", python_version)
+    if python_version == (3, 12):
+        check_platform()
+    else:
+        with pytest.raises(ChatError, match="Python 3.12"):
+            check_platform()

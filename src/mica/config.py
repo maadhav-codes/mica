@@ -1,4 +1,4 @@
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 import json
 import math
 import os
@@ -60,6 +60,7 @@ class Settings:
     max_tokens: int = 512
     memory_gb: float = 9.0
     last_model: str | None = None
+    voice: dict = field(default_factory=dict)
 
     def validate(self):
         if not isinstance(self.system, str) or (self.last_model is not None and not isinstance(self.last_model, str)):
@@ -79,6 +80,13 @@ class Settings:
             raise ChatError("Require 0 < max_tokens < context_budget <= 32768.")
         if not 1 <= self.memory_gb <= 12:
             raise ChatError("MLX memory limit must be between 1 and 12 GiB; leave room for macOS.")
+        from .voice import VoiceSettings
+        if not isinstance(self.voice, dict):
+            raise ChatError("voice settings must be an object.")
+        try:
+            VoiceSettings(**self.voice).validate()
+        except TypeError as e:
+            raise ChatError(f"Invalid voice settings: {e}") from e
         return self
 
     @classmethod

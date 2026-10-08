@@ -223,6 +223,17 @@ def resolve(model: str, offline=False, announce=print):
         raise ChatError("Select a model directory containing config, tokenizer, and native MLX safetensors; individual weight files are unsupported.")
     if path.exists() or model.startswith(("/", ".", "~")):
         return validate_local(path)
+    from .assets import model_path
+    staged = model_path(model)
+    if staged.is_dir():
+        try:
+            provenance = staged / "mica-asset.json"
+            revision = read_json(provenance).get("revision") if provenance.exists() else None
+            return validate_local(staged, model, revision)
+        except (ChatError, OSError, ValueError):
+            if offline:
+                raise
+            # A cancelled staging copy can be repaired by rerunning download.
     from huggingface_hub import snapshot_download
     registry_path = home() / "models.json"
     registry = read_json(registry_path) if registry_path.exists() else {}

@@ -112,3 +112,98 @@ The hardware smoke script expects the 3B model to have been downloaded. It block
 Benchmark settings and prompt are saved alongside measurements. Cold load means first load in the benchmark process; download/validation time is excluded and OS disk caches are not flushed. The first generation is reported separately from subsequent warm runs. Each benchmark prompt starts with an empty KV cache, measuring warm weights rather than a cached-prefix hit. TTFT measures elapsed time to the first MLX-LM token response. Prompt-processing speed and generation tokens/second are MLX-LM's reported values; prompt speed covers only the uncached suffix when caches are reused. Token counts include MLX-LM's final stop response. Peak MLX allocation bytes are reset per generation; process peak RSS is a lifetime high-water mark on macOS, not a per-turn increment. Load peak allocation is reported separately. Read `verification/RESULTS.md` for actual results and outstanding checks.
 
 Implementation follows the [official MLX-LM API and source](https://github.com/ml-explore/mlx-lm) and [MLX memory-control documentation](https://ml-explore.github.io/mlx/build/html/python/memory_management.html). The installed 0.32.0 source was inspected for loader behavior, architecture dispatch, streaming metrics, and cache trimming; `uv.lock` fixes the tested APIs.
+
+## Local voice mode
+
+Text remains the default. Install the optional speech extra, prepare assets while online, then start voice mode:
+
+```sh
+uv sync --locked --python 3.12 --extra voice --group dev
+uv run --locked --extra voice mica voice-download
+uv run --locked --extra voice mica chat --io-mode voice --offline \
+  --model mlx-community/Llama-3.2-3B-Instruct-4bit
+```
+
+At `Voice>` press Enter to start recording, then Enter again to stop and submit. Recording also stops automatically at the configured duration limit. Typed slash commands remain available before recording starts. `/mode` shows the mode; `/mode text` and `/mode voice` switch within the same conversation without reloading the language model or invalidating its KV cache. In voice mode typed messages require switching to text. Transcribed slash commands are ordinary user content. `/load` restores voice settings as part of the session and recreates speech resources if voice is active; speech setup failure returns to text mode.
+
+The terminal displays Recording, Transcribing, Generating, and Speaking states. It displays exactly one `You (voice)>` transcript before using the existing generation loop. Silence/empty transcripts do not create turns. Completed assistant text streams as usual and is then spoken. Recording, language generation, speech synthesis, and playback are sequential. Ctrl+C cancels recording/transcription without creating a turn; during generation it retains the existing incomplete-turn semantics; during speech it stops speech and keeps the completed text. Speech errors also keep completed text. `/mode text` releases speech resources; failed voice setup leaves text mode usable. Models remain cached in one local speech worker between successful voice turns; cancellation/errors terminate that worker and the next turn reloads it. No server is started.
+
+Configure speech using the `voice` object in Mica's `config.json` (merge this object into the existing JSON):
+
+```json
+{
+  "voice": {
+    "whisper_model": "mlx-community/whisper-small-mlx",
+    "language": "auto",
+    "kokoro_model": "mlx-community/Kokoro-82M-bf16",
+    "voice": "af_heart",
+    "speed": 1.0,
+    "microphone": null,
+    "output_device": null,
+    "max_duration": 60.0
+  }
+}
+```
+
+Both models accept a repository ID or absolute local directory. Whisper `language` accepts `auto` or an ISO code recognized by the installed mlx-whisper tokenizer (for example `en`, `hi`, `fr`). English-only models reject other explicit languages. Kokoro's language is derived independently from the voice prefix: `a` American English, `b` British English, `e` Spanish, `f` French, `h` Hindi, `i` Italian, `p` Brazilian Portuguese. Use a matching voice safetensors file actually present in the selected model's `voices/` directory. The default repository includes `af_heart`; other repositories may supply additional languages. Japanese and Chinese Kokoro phonemizers are outside this initial extra. Automatic Whisper language detection does not select a different Kokoro voice; choose a voice suitable for the assistant's output language. Voice files/tensor dimensions, model architecture and tokenizer language support are checked on setup. Speed must be finite and between 0.5 and 2.0; duration between 1 and 300 seconds. Devices accept null (system default), a device name, or a nonnegative numeric index. List devices with `uv run --locked --extra voice python -m sounddevice`. Grant your terminal microphone access in macOS System Settings → Privacy & Security → Microphone. Devices must support mono float32 input at 16 kHz and output at 24 kHz.
+
+The locked speech APIs are mlx-whisper 0.4.3, mlx-audio 0.4.3, Misaki 0.9.4 and sounddevice 0.5.3. The dependency lock targets Python 3.12 alongside MLX 0.32.3 and MLX-LM 0.32.0. Misaki 0.9.4 requires Python >=3.8,<3.13, so Python 3.12 is supported and the project excludes 3.13. See [Whisper's source](https://github.com/ml-explore/mlx-examples/tree/main/whisper) and [Kokoro's pipeline](https://github.com/Blaizzy/mlx-audio/blob/main/mlx_audio/tts/models/kokoro/pipeline.py). Misaki's English phonemizer uses `en_core_web_sm` 3.8.0, installed from a pinned wheel by the voice extra before offline English speech use. Its dictionaries are packaged with Misaki. `espeakng-loader` bundles the native eSpeak NG library and language data used by the English fallback and other supported languages; no Homebrew phonemizer installation is required. The extra has substantial transitive dependencies (including spaCy and Torch for phonemizer dependencies); inference uses the local MLX models. Text-only installs need none of these speech packages.
+
+`voice-download` explicitly fetches complete speech snapshots and runs a short synthesis without opening any audio devices, verifying the configured voice and phonemizer. Re-run after changing repositories/voice. Local directories must already contain complete MLX assets: Whisper config/weights, Kokoro config/weights/voice safetensors. Speech inference uses absolute local asset paths, offline library flags and denied socket connections. A missing spaCy model is rejected before Misaki can invoke its downloader. `--offline` never checks remote metadata or fetches speech assets; missing assets name the setup command. Download/install every dependency and language model before disconnecting networking. For a fully cached offline launch use:
+
+```sh
+.venv/bin/mica voice-download --offline
+.venv/bin/mica chat --offline --io-mode voice --model YOUR_CACHED_LLM
+```
+
+Or use `uv run --offline --locked --extra voice ...` along with Mica's `--offline`. Speech adds memory beyond the language engine's guideline: use the small Whisper default, the 3B LLM and modest context initially. The microphone buffer is bounded (at most 300 seconds of mono 16 kHz PCM). Captured audio is held only in memory, never saved by default. Synthesis uses bounded text chunks with playback backpressure, and device streams are closed on success, error and cancellation. Session JSON stores transcripts and raw assistant text. Markdown/code filtering applies only to the spoken copy: fenced code is announced as omitted, links are read by their labels, and common formatting markers are removed.
+
+### Manual Apple Silicon voice smoke test
+
+These steps require interactive audio hardware and have **not been performed** as part of automated verification:
+
+1. Install the extra, download the LLM, run `mica voice-download`, and start text chat. Send a typed turn; switch with `/mode voice` and confirm the previous conversation is remembered without another LLM load.
+2. Press Enter, speak, and press Enter again. Confirm microphone permission, a single displayed transcript, streamed response, and audible Kokoro playback. Verify no capture occurs during playback. Wait through the duration cap on another recording and confirm automatic submission.
+3. Record silence and confirm no turn is added. Say a slash command such as “slash new”; confirm it is user content and does not clear history.
+4. Press Ctrl+C during recording, transcription, language generation, synthesis, and playback. Confirm return to the prompt, no delayed playback, and the expected history policy. Save/load sessions to inspect incomplete flags. Switch modes repeatedly and confirm devices remain available to other apps.
+5. Test an unavailable device, revoked microphone permission, unknown voice, and missing cached model/voice. Confirm actionable messages and successful text chat after failed voice setup. Confirm a TTS failure retains a successful text turn.
+6. Disable Wi-Fi/Ethernet after setup. Run the two offline commands above, record/transcribe/generate/play multiple turns, save/load, and switch modes. Confirm no downloads or network prompts. Restore networking when finished.
+
+Automated fake-adapter coverage in `tests/test_voice.py` covers shared conversation routing, mode switching, cancellation at each stage, empty transcription, TTS failure, cache-only asset resolution, resource cleanup and text-only dependency isolation. Run `uv run --locked --extra voice pytest -q` for the complete suite.
+
+To verify the installed speech APIs, Whisper tokenizer, PortAudio library and English phonemizer without downloading weights or opening audio devices:
+
+```sh
+uv run --locked --extra voice python scripts/voice_dependency_smoke.py
+```
+
+This check blocks socket connections before importing speech libraries. On Python 3.12.13, the real dependency smoke check and all 115 automated tests passed; live microphone recording and Whisper/Kokoro inference/playback remain manual checks. See [voice compatibility results](verification/voice-python312.md).
+
+## Project asset folder
+
+Download all assets needed for the default text/voice setup with:
+
+```sh
+uv sync --locked --python 3.12 --extra voice
+uv run --locked --extra voice mica download --model mlx-community/Llama-3.2-3B-Instruct-4bit
+uv run --locked --extra voice mica voice-download
+```
+
+The download commands populate `assets/` under the current working directory:
+
+- `models/<owner>/<repository>/`: language/speech model weights, configs, tokenizers and Kokoro voice files. Complete snapshot files are copied with Hub symlinks dereferenced.
+- `runtime/en_core_web_sm/`: English spaCy model.
+- `runtime/misaki/`: phonemizer code and dictionaries.
+- `runtime/espeakng_loader/`: bundled eSpeak native library and language data.
+- `runtime/mlx_whisper/`: Whisper code and packaged tokenizer/filter resources.
+
+These runtime copies are selected by the speech worker before importing speech packages. Python 3.12 and the installed voice dependencies are still required; `assets/` is not a replacement for the virtual environment. The folder is Git-ignored because it contains large binaries. Set `MICA_ASSETS_DIR=/absolute/path/to/assets` to choose a fixed location, especially when running from a different directory. Both model loaders prefer this folder before the global Hub cache. Existing global caches remain available for migration; download commands copy their contents into the asset folder. Explicit local model directory arguments remain supported.
+
+Once setup completes, run from the project directory (or set `MICA_ASSETS_DIR`):
+
+```sh
+.venv/bin/mica voice-download --offline
+.venv/bin/mica chat --offline --io-mode voice --model mlx-community/Llama-3.2-3B-Instruct-4bit
+```
+
+Use `mica download --model OTHER_LLM` for additional language models. `voice-download` stages the Whisper/Kokoro repositories configured in `config.json`; it does not automatically download every alternative model. Asset provenance files record repository/revision or packaged resource names. Raw recordings and saved conversations are not stored in this folder.

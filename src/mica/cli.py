@@ -1,5 +1,6 @@
 from dataclasses import asdict
 from functools import wraps
+from enum import Enum
 from importlib.metadata import version
 import json
 from pathlib import Path
@@ -98,7 +99,29 @@ def download(model: str = typer.Option(...), offline: bool = False):
     """Download only the selected, validated native MLX 4-bit model."""
     setup(offline)
     spec = resolve(model, offline, announce=lambda s: console.print(s, markup=False))
+    from .assets import stage_model
+    if not Path(model).expanduser().is_dir():
+        spec.path = stage_model(spec.identity, spec.path, spec.revision)
     console.print(f"Validated {spec.identity}\n{spec.path}", markup=False)
+
+
+@app.command("voice-download")
+@guarded
+def voice_download(offline: bool = False):
+    """Cache configured speech models/voices and validate phonemizer assets."""
+    setup(offline)
+    from .voice import VoiceSettings, LocalSpeech, resolve_assets
+    settings = VoiceSettings(**Settings.load().voice)
+    from .assets import stage_speech_resources
+    stage_speech_resources()
+    paths = resolve_assets(settings, offline, prepare=True)
+    speech = LocalSpeech(settings, paths)
+    try:
+        for _ in speech.synthesize("Speech assets are ready."):
+            pass
+        console.print("Speech models, configured voice and phonemizer validated for offline use.")
+    finally:
+        speech.close()
 
 
 @app.command()
@@ -116,7 +139,13 @@ def doctor():
     console.print("MLX memory limit is a guideline. Other apps, KV cache and swap affect usable memory; no system settings are changed.")
 
 
-HELP = """/help — commands
+class IOMode(str, Enum):
+    text = "text"
+    voice = "voice"
+
+
+HELP = """/mode [text|voice] — show/switch input and output mode
+/help — commands
 /model [repository-or-directory] — pick/switch, releasing the previous model
 /new — clear conversation and KV cache
 /save [path] — save JSON session (default: Mica sessions/last.json)
@@ -124,7 +153,9 @@ HELP = """/help — commands
 /system [instructions] — replace system instructions (no argument clears them)
 /stats — most recent generation measurements
 /exit — exit (EOF also exits)
-Enter sends; Esc+Enter inserts a newline. Ctrl+C cancels generation or clears input.
+Text: Enter sends; Esc+Enter inserts a newline.
+Voice: Enter starts recording; Enter again stops/submits. Slash commands work before recording.
+Ctrl+C cancels the active operation or clears input.
 Interrupted turns are saved with incomplete=true and removed as a pair before the next turn.
 """
 
@@ -141,6 +172,7 @@ def chat(
     context_budget: int | None = None,
     max_tokens: int | None = None,
     memory_gb: float | None = None,
+    io_mode: IOMode = typer.Option(IOMode.text, help="Text or local half-duplex voice I/O."),
 ):
     """Stream a local conversation; never use remote inference."""
     setup(offline)
@@ -152,6 +184,24 @@ def chat(
     settings.validate()
     identity = model or settings.last_model or picker(offline)
     engine = Engine()
+    voice_io = None
+    active_mode = "text"
+
+    def set_mode(mode):
+        nonlocal voice_io, active_mode
+        if mode not in ("text", "voice"):
+            raise ChatError("Use /mode text or /mode voice.")
+        if mode == active_mode:
+            return
+        if mode == "voice":
+            from .voice import VoiceSettings, create_voice
+            candidate = create_voice(VoiceSettings(**settings.voice), offline)
+            voice_io = candidate
+        else:
+            if voice_io is not None:
+                voice_io.close()
+            voice_io = None
+        active_mode = mode
 
     def switch(identity, selected_settings):
         spec = resolve(identity, offline, announce=lambda s: console.print(s, markup=False))
@@ -164,6 +214,12 @@ def chat(
     try:
         identity = switch(identity, settings)
         conversation = Conversation(identity, settings)
+        try:
+            set_mode(io_mode.value)
+        except KeyboardInterrupt:
+            console.print("Voice setup cancelled; using text mode.")
+        except Exception as e:
+            console.print(f"Voice setup failed: {explain(e)}. Using text mode.", style="red", markup=False)
         from prompt_toolkit import PromptSession
         from prompt_toolkit.history import FileHistory
         from prompt_toolkit.key_binding import KeyBindings
@@ -183,21 +239,59 @@ def chat(
         session = PromptSession(history=FileHistory(str(history_path)), multiline=True, key_bindings=keys)
         console.print(HELP, markup=False)
         default_session = home() / "sessions" / "last.json"
+        def wait_for_stop(full):
+            # prompt_toolkit owns stdin; timeout also submits at the duration cap.
+            import asyncio
+            async def wait():
+                task = asyncio.create_task(session.prompt_async("Recording> "))
+                try:
+                    while not task.done() and not full.is_set():
+                        await asyncio.sleep(0.05)
+                    if task.done():
+                        task.result()
+                finally:
+                    if not task.done():
+                        task.cancel()
+                    await asyncio.gather(task, return_exceptions=True)
+            asyncio.run(wait())
+
         while True:
+            from_voice = False
             try:
-                text = session.prompt("You> ")
+                text = session.prompt("Voice> Enter records; /command> " if active_mode == "voice" else "You> ")
             except EOFError:
                 break
             except KeyboardInterrupt:
                 continue
+            if active_mode == "voice" and not text.strip():
+                try:
+                    text = voice_io.listen(wait_for_stop, lambda state: console.print(state, markup=False))
+                    if not text.strip():
+                        console.print("No speech detected.")
+                        continue
+                    from_voice = True
+                    console.print(f"You (voice)> {text}", markup=False, highlight=False)
+                except KeyboardInterrupt:
+                    console.print("Voice input cancelled.")
+                    continue
+                except Exception as e:
+                    console.print(explain(e), style="red", markup=False)
+                    continue
             if not text.strip():
                 continue
-            if text.startswith("/"):
+            if active_mode == "voice" and not from_voice and not text.startswith("/"):
+                console.print("Press Enter to record, or use /mode text for typed messages.")
+                continue
+            if text.startswith("/") and not from_voice:
                 command, _, argument = text.partition(" ")
                 try:
-                    if command == "/exit":
+                    if command == "/mode":
+                        if argument.strip():
+                            set_mode(argument.strip())
+                        console.print(f"I/O mode: {active_mode}", markup=False)
+                    elif command == "/exit":
                         break
-                    if command == "/help":
+                    elif command == "/help":
                         console.print(HELP, markup=False)
                     elif command == "/stats":
                         console.print(engine.stats)
@@ -216,8 +310,11 @@ def chat(
                         else:
                             restored = Conversation.load(path)
                             switch(restored.model, restored.settings)
+                            previous_mode = active_mode
+                            set_mode("text")
                             conversation, settings = restored, restored.settings
                             engine.invalidate()
+                            set_mode(previous_mode)
                     elif command == "/model":
                         selected = argument.strip() or picker(offline)
                         identity = switch(selected, settings)
@@ -242,6 +339,8 @@ def chat(
             except ChatError as e:
                 console.print(str(e), style="red", markup=False)
                 continue
+            if from_voice:
+                console.print("Generating…", markup=False)
             console.print("Assistant> ", end="")
             output = []
             incomplete = False
@@ -262,8 +361,19 @@ def chat(
                 if incomplete:
                     engine.invalidate()
                 console.print()
+            if from_voice and not incomplete:
+                try:
+                    voice_io.speak("".join(output), lambda state: console.print(state, markup=False))
+                except KeyboardInterrupt:
+                    console.print("Speech cancelled; completed text retained.")
+                except Exception as e:
+                    console.print(f"Speech failed: {explain(e)}. Completed text retained.", style="red", markup=False)
     finally:
-        engine.close()
+        try:
+            if voice_io is not None:
+                voice_io.close()
+        finally:
+            engine.close()
 
 
 @app.command()
