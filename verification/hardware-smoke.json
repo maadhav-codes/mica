@@ -1,0 +1,43 @@
+{
+  "model": "mlx-community/Llama-3.2-3B-Instruct-4bit",
+  "revision": "7f0dc925e0d0afb0322d96f9255cfddf2ba5636e",
+  "network_connections_allowed": false,
+  "turns": [
+    {
+      "input": "My name is Mira. Say hello using my name.",
+      "output": "Hello Mira.",
+      "chunks": 5,
+      "ttft_seconds": 2.068512083999849,
+      "elapsed_seconds": 2.1714646249993166,
+      "formatted_prompt_tokens": 52,
+      "cached_prompt_tokens": 0,
+      "processed_prompt_tokens": 52,
+      "prompt_tokens_per_second": 29.716842772184645,
+      "generation_tokens": 5,
+      "generation_tokens_per_second": 59.05043940942328,
+      "peak_mlx_bytes": 1996668528,
+      "process_peak_rss_bytes": 1333051392,
+      "finish_reason": "stop"
+    },
+    {
+      "input": "What name did I tell you?",
+      "output": "You told me your name is Mira.",
+      "chunks": 10,
+      "ttft_seconds": 0.19434954099961033,
+      "elapsed_seconds": 0.7167712079999546,
+      "formatted_prompt_tokens": 73,
+      "cached_prompt_tokens": 52,
+      "processed_prompt_tokens": 21,
+      "prompt_tokens_per_second": 108.40127034546717,
+      "generation_tokens": 10,
+      "generation_tokens_per_second": 20.845435281057973,
+      "peak_mlx_bytes": 1948103936,
+      "process_peak_rss_bytes": 1333051392,
+      "finish_reason": "stop"
+    }
+  ],
+  "cancellation_and_recovery": "passed: SIGINT, incomplete session roundtrip, discarded pair, regenerated",
+  "model_release_and_reload": "passed: previous model collected, caches cleared, same 3B artifacts reloaded",
+  "different_repository_switch": "not run: 7B weights were not downloaded",
+  "offline_generation_after_reload": "passed"
+}

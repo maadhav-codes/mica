@@ -1,0 +1,29 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "mica"
+version = "0.1.0"
+description = "Mica — Local conversations, powered by MLX."
+requires-python = ">=3.11,<3.12"
+dependencies = [
+    "mlx==0.32.3",
+    "mlx-lm==0.32.0",
+    "huggingface-hub",
+    "typer",
+    "rich",
+    "prompt-toolkit",
+]
+
+[project.scripts]
+mica = "mica.cli:app"
+
+[dependency-groups]
+dev = ["pytest"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/mica"]
