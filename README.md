@@ -2,7 +2,19 @@
 
 **Mica — Local conversations, powered by MLX.**
 
-A local conversational CLI for native arm64 Python 3.11 on macOS Apple Silicon. Inference uses MLX-LM exclusively. No servers, background processes, telemetry, conversation uploads, conversion, or alternative inference backends.
+A local conversation tool with a CLI and a [backend API](src/mica/api/README.md) for native arm64 Python 3.11 on macOS Apple Silicon. Inference uses MLX-LM exclusively. Use it directly from Python or opt into its localhost HTTP adapter. No server runs by default, and there are no background daemons, telemetry, conversation uploads, conversion, or alternative inference backends.
+
+## Use as a backend
+
+```python
+from mica.api import Mica
+
+with Mica("mlx-community/Llama-3.2-3B-Instruct-4bit") as backend:
+    result = backend.generate("Explain why the sky is blue.")
+    text = result.text
+```
+
+For HTTP access, run `uv run python -m mica.api --model mlx-community/Llama-3.2-3B-Instruct-4bit`, then POST JSON to `http://127.0.0.1:8000/v1/generate`. Both interfaces default to offline model access and reuse the model already downloaded by Mica. See the [API guide](src/mica/api/README.md) for streaming, chat sessions, cancellation and backend integration.
 
 ## Install with uv
 

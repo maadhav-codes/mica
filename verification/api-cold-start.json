@@ -1,0 +1,99 @@
+{
+  "startup": "fresh subprocess, no inference warmup",
+  "port": 52687,
+  "first_http_request": {
+    "text": "MLX (Motorized Linear eXtension) is a type of linear actuator used in robotics and other applications. It's a type of motorized linear motion system that provides a high degree of precision and control.\n\nThe MLX typically consists of a motor, a gearbox, and a linear guide, which work together to move a load along a linear path. The motor provides the power, the gearbox adjusts the speed and torque, and the linear guide keeps the load moving in a straight line.\n\nThe MLX is commonly used in robotics, CNC machines, and other applications where precise linear motion is required.",
+    "model": "mlx-community/Llama-3.2-3B-Instruct-4bit",
+    "session_id": null,
+    "stats": {
+      "ttft_seconds": 2.991607624999233,
+      "elapsed_seconds": 10.780086333999861,
+      "formatted_prompt_tokens": 47,
+      "cached_prompt_tokens": 0,
+      "processed_prompt_tokens": 47,
+      "prompt_tokens_per_second": 18.293397888251516,
+      "generation_tokens": 124,
+      "generation_tokens_per_second": 16.017115751423503,
+      "peak_mlx_bytes": 1977647024,
+      "process_peak_rss_bytes": 1049591808,
+      "finish_reason": "stop"
+    },
+    "incomplete": false
+  },
+  "streaming": [
+    {
+      "type": "delta",
+      "text": "Ready"
+    },
+    {
+      "type": "delta",
+      "text": "."
+    },
+    {
+      "type": "delta",
+      "text": ""
+    },
+    {
+      "type": "done",
+      "model": "mlx-community/Llama-3.2-3B-Instruct-4bit",
+      "session_id": null,
+      "stats": {
+        "ttft_seconds": 0.5600490420001734,
+        "elapsed_seconds": 0.6217491250008607,
+        "formatted_prompt_tokens": 44,
+        "cached_prompt_tokens": 0,
+        "processed_prompt_tokens": 44,
+        "prompt_tokens_per_second": 78.79070591978707,
+        "generation_tokens": 3,
+        "generation_tokens_per_second": 69.21266692187368,
+        "peak_mlx_bytes": 1962997180,
+        "process_peak_rss_bytes": 1049591808,
+        "finish_reason": "stop"
+      },
+      "incomplete": false
+    }
+  ],
+  "multi_turn_across_http_threads": [
+    {
+      "text": "Hello Mira!",
+      "model": "mlx-community/Llama-3.2-3B-Instruct-4bit",
+      "session_id": "46e3713f-8218-4e33-824a-ab4c16b7c7ed",
+      "stats": {
+        "ttft_seconds": 0.27979320799931884,
+        "elapsed_seconds": 0.568826208000246,
+        "formatted_prompt_tokens": 47,
+        "cached_prompt_tokens": 0,
+        "processed_prompt_tokens": 47,
+        "prompt_tokens_per_second": 168.29202206329478,
+        "generation_tokens": 5,
+        "generation_tokens_per_second": 20.40484227306512,
+        "peak_mlx_bytes": 1970730470,
+        "process_peak_rss_bytes": 1049591808,
+        "finish_reason": "stop"
+      },
+      "incomplete": false
+    },
+    {
+      "text": "Your name is Mira.",
+      "model": "mlx-community/Llama-3.2-3B-Instruct-4bit",
+      "session_id": "46e3713f-8218-4e33-824a-ab4c16b7c7ed",
+      "stats": {
+        "ttft_seconds": 0.22047570799986715,
+        "elapsed_seconds": 0.6192854580003768,
+        "formatted_prompt_tokens": 66,
+        "cached_prompt_tokens": 47,
+        "processed_prompt_tokens": 19,
+        "prompt_tokens_per_second": 86.38256513960665,
+        "generation_tokens": 7,
+        "generation_tokens_per_second": 20.126519152184105,
+        "peak_mlx_bytes": 1936815418,
+        "process_peak_rss_bytes": 1049591808,
+        "finish_reason": "stop"
+      },
+      "incomplete": false
+    }
+  ],
+  "cancellation_and_recovery": "passed",
+  "server_exit_code": 0,
+  "server_output": "Mica API listening at http://127.0.0.1:52687\n"
+}

@@ -1,0 +1,95 @@
+{
+  "python_multiturn": [
+    {
+      "text": "Hello Mira!",
+      "model": "mlx-community/Llama-3.2-3B-Instruct-4bit",
+      "session_id": "c8245dc9-2cf1-4f6a-bdb2-7a6114a78b7b",
+      "stats": {
+        "ttft_seconds": 1.24710129199957,
+        "elapsed_seconds": 1.3506608749994484,
+        "formatted_prompt_tokens": 47,
+        "cached_prompt_tokens": 0,
+        "processed_prompt_tokens": 47,
+        "prompt_tokens_per_second": 54.89828749571549,
+        "generation_tokens": 5,
+        "generation_tokens_per_second": 58.546838430869634,
+        "peak_mlx_bytes": 1977647024,
+        "process_peak_rss_bytes": 626556928,
+        "finish_reason": "stop"
+      },
+      "incomplete": false
+    },
+    {
+      "text": "Your name is Mira.",
+      "model": "mlx-community/Llama-3.2-3B-Instruct-4bit",
+      "session_id": "c8245dc9-2cf1-4f6a-bdb2-7a6114a78b7b",
+      "stats": {
+        "ttft_seconds": 0.1038996249990305,
+        "elapsed_seconds": 0.2520951659989805,
+        "formatted_prompt_tokens": 66,
+        "cached_prompt_tokens": 47,
+        "processed_prompt_tokens": 19,
+        "prompt_tokens_per_second": 183.77226484361574,
+        "generation_tokens": 7,
+        "generation_tokens_per_second": 54.27562728194793,
+        "peak_mlx_bytes": 1936815352,
+        "process_peak_rss_bytes": 626556928,
+        "finish_reason": "stop"
+      },
+      "incomplete": false
+    }
+  ],
+  "stream_close_session_recovery": "passed",
+  "http_generation": {
+    "text": "Hello!",
+    "model": "mlx-community/Llama-3.2-3B-Instruct-4bit",
+    "session_id": null,
+    "stats": {
+      "ttft_seconds": 0.36253162499997416,
+      "elapsed_seconds": 0.43370745799984434,
+      "formatted_prompt_tokens": 44,
+      "cached_prompt_tokens": 0,
+      "processed_prompt_tokens": 44,
+      "prompt_tokens_per_second": 121.60226180243306,
+      "generation_tokens": 3,
+      "generation_tokens_per_second": 65.70871968472113,
+      "peak_mlx_bytes": 1962997152,
+      "process_peak_rss_bytes": 626556928,
+      "finish_reason": "stop"
+    },
+    "incomplete": false
+  },
+  "http_streaming": [
+    {
+      "type": "delta",
+      "text": "Ready"
+    },
+    {
+      "type": "delta",
+      "text": "."
+    },
+    {
+      "type": "delta",
+      "text": ""
+    },
+    {
+      "type": "done",
+      "model": "mlx-community/Llama-3.2-3B-Instruct-4bit",
+      "session_id": null,
+      "stats": {
+        "ttft_seconds": 0.36666437500025495,
+        "elapsed_seconds": 0.4818950409990066,
+        "formatted_prompt_tokens": 44,
+        "cached_prompt_tokens": 0,
+        "processed_prompt_tokens": 44,
+        "prompt_tokens_per_second": 120.38263873421447,
+        "generation_tokens": 3,
+        "generation_tokens_per_second": 40.48831116622562,
+        "peak_mlx_bytes": 1962997152,
+        "process_peak_rss_bytes": 626556928,
+        "finish_reason": "stop"
+      },
+      "incomplete": false
+    }
+  ]
+}
