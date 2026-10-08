@@ -236,7 +236,9 @@ def _worker(connection, settings, paths):
         connection.send(("ready", None))
         while True:
             operation, value = connection.recv()
-            if operation == "transcribe":
+            if operation == "close":
+                return
+            elif operation == "transcribe":
                 result = mlx_whisper.transcribe(value, path_or_hf_repo=paths[0], language=None if settings.language == "auto" else settings.language, verbose=None)
                 del value  # Do not retain raw recordings while the language model generates.
                 connection.send(("result", result["text"].strip()))
@@ -258,8 +260,9 @@ def _worker(connection, settings, paths):
 
 
 class LocalSpeech:
-    def __init__(self, settings, paths):
+    def __init__(self, settings, paths, cancel_event=None):
         self.settings, self.paths = settings, paths
+        self.cancel_event = cancel_event
         self.process = self.connection = None
         try:
             self._start()
@@ -268,7 +271,13 @@ class LocalSpeech:
             raise
 
     def _receive(self):
+        def check_cancel():
+            event = getattr(self, "cancel_event", None)
+            if event is not None and event.is_set():
+                raise ChatError("Speech operation cancelled.")
+        check_cancel()
         while not self.connection.poll(0.05):
+            check_cancel()
             if not self.process.is_alive():
                 raise ChatError("Speech worker exited. Reduce model size/recording duration and check memory.")
         try:
@@ -310,11 +319,22 @@ class LocalSpeech:
             yield value
             self.connection.send(("next", None))
 
-    def close(self):
+    def shutdown(self):
+        """Release an idle worker normally so third-party finalizers can run."""
+        self.close(graceful=True)
+
+    def close(self, graceful=False):
         if self.process is not None:
             if self.process.pid is not None:
-                self.process.terminate()
-                self.process.join(timeout=2)
+                if graceful and self.process.is_alive() and self.connection is not None:
+                    try:
+                        self.connection.send(("close", None))
+                    except (BrokenPipeError, EOFError, OSError):
+                        pass
+                    self.process.join(timeout=2)
+                else:
+                    self.process.terminate()
+                    self.process.join(timeout=2)
                 if self.process.is_alive():
                     self.process.kill()
                     self.process.join()

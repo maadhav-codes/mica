@@ -69,7 +69,7 @@ uv run python -m mica.api \
   --port 8000
 ```
 
-Add `--online` only to allow model metadata checks/downloads. Set `MICA_API_TOKEN` to require `Authorization: Bearer <token>` on every request. No tokens or request contents are logged. This adapter is intended for a local backend; it rejects browser-origin requests and provides no CORS access. Have your own backend call it and relay results to a frontend.
+Add `--online` only to allow model metadata checks/downloads. Set `MICA_API_TOKEN` to require `Authorization: Bearer <token>` on every request. No tokens or request contents are logged. Browser origins are rejected by default. Use an explicitly allowed loopback origin for a local frontend (see audio endpoints below), or have your own backend relay requests.
 
 Start it programmatically instead of using any terminal command:
 
@@ -88,7 +88,7 @@ with Mica("mlx-community/Llama-3.2-3B-Instruct-4bit") as backend:
 | POST | `/v1/sessions` | Create an in-memory session with optional system instructions |
 | GET | `/v1/sessions/{id}` | Read session settings and messages |
 | DELETE | `/v1/sessions/{id}` | Delete an unused session |
-| POST | `/v1/cancel` | Cooperatively cancel the active generation |
+| POST | `/v1/cancel` | Cancel active text/audio work |
 
 ### Generate text
 
@@ -136,7 +136,7 @@ curl http://127.0.0.1:8000/v1/sessions \
 
 Use the returned `id` as `session_id` in subsequent `/v1/generate` requests. Sessions are isolated and remain in memory until deleted or shutdown. There is a default limit of 32 sessions; delete unused ones. Durable session save/load is available through the Python API, so HTTP callers never supply server file paths.
 
-Requests require JSON objects, accept at most 512 KiB, reject nonfinite numbers/unknown fields, and do not accept chunked request bodies. Invalid input returns 400, unknown sessions/routes 404, session limit 429, and a busy inference engine 503. Generation is serialized rather than queued; retry 503 after the active request completes. A health response means the model is loaded, not that no request is currently generating.
+Text/session requests require JSON objects, accept at most 512 KiB, reject nonfinite numbers/unknown fields, and do not accept chunked request bodies. Invalid input returns 400, unknown sessions/routes 404, session limit 429, and a busy inference engine 503. Generation is serialized rather than queued; retry 503 after the active request completes. A health response means the model is loaded, not that no request is currently generating.
 
 ## Verification
 
@@ -151,3 +151,93 @@ The smoke script requires the downloaded 3B preset and uses only local HTTP and 
 The cold-start script launches a fresh API subprocess and sends an HTTP generation request before any inference warmup. It then checks streaming, chat history/cache reuse across requests, cancellation/recovery and clean shutdown. It uses an available loopback port so it can run alongside your normal server.
 
 See [actual API verification results](../../../verification/api-results.md).
+
+## Local audio endpoints
+
+Install the voice extra and prepare the speech assets before starting the server:
+
+```sh
+uv sync --locked --python 3.12 --extra voice
+uv run --locked --extra voice mica voice-download
+uv run --locked --extra voice python -m mica.api \
+  --model mlx-community/Llama-3.2-3B-Instruct-4bit --voice \
+  --allow-origin http://localhost:5173
+```
+
+`--voice` enables audio endpoints. Models load lazily on the first audio request and remain cached in the existing local speech worker; text-only servers do not import speech dependencies. The default is offline and uses staged `assets/` files. `--online` explicitly allows missing models to be downloaded. CLI startup reads the `voice` settings object from Mica's `config.json`; programmatic startup accepts `audio=True, audio_settings={...}` on `MicaHTTPServer` or `serve`. For example `audio_settings={"voice":"af_heart", "language":"auto", "speed":1.0}`. All inference is local; no microphone, speaker or temporary audio files are used by the server. The frontend owns capture/playback.
+
+| Method | Path | Request | Response |
+| --- | --- | --- | --- |
+| POST | `/v1/audio/transcribe` | Binary PCM16 WAV, `Content-Type: audio/wav` | JSON `{"text":"..."}` |
+| POST | `/v1/audio/synthesize` | JSON `{"text":"Hello"}` | Mono PCM16 `audio/wav` |
+| POST | `/v1/audio/synthesize` | JSON `{"text":"Hello", "stream":true}` | NDJSON audio chunks, then `done` |
+| POST | `/v1/audio/cancel` | JSON `{}` | JSON `{"cancel_requested":true|false}` |
+
+`/health` includes `audio_enabled`. Disabled audio endpoints return 503 with setup instructions. Audio requests do not create sessions or modify conversation history. To generate a voice reply, transcribe, submit the resulting text to `/v1/generate`, then synthesize its response (or have your frontend submit sentence chunks as it receives text). Speech requests are serialized independently of text generation, allowing local LLM and speech inference to overlap while sharing GPU resources. Concurrent audio requests receive 503 rather than being queued.
+
+### Transcribe WAV
+
+```sh
+curl http://127.0.0.1:8000/v1/audio/transcribe \
+  -H 'Content-Type: audio/wav' --data-binary @recording.wav
+```
+
+Accepts uncompressed PCM16 WAV, one or two channels, at 8–48 kHz; stereo is downmixed and resampled to 16 kHz. The configured maximum recording duration applies (default 60 seconds), with a 20 MiB upload cap. Silence returns empty text. Browser MediaRecorder WebM/Opus, multipart uploads and arbitrary server file paths are not accepted: encode PCM16 WAV in the frontend before upload. Unsupported content types return 415, invalid/truncated audio 400, and oversized bodies 413. Uploads require Content-Length and cannot use chunked transfer encoding.
+
+### Synthesize WAV
+
+```sh
+curl http://127.0.0.1:8000/v1/audio/synthesize \
+  -H 'Content-Type: application/json' \
+  -d '{"text":"Hello from Mica."}' --output response.wav
+```
+
+Text must be nonempty and at most 10,000 characters. Common Markdown is prepared for speech and fenced code is omitted, as in CLI voice mode. Responses are limited to 20 MiB of PCM or 300 seconds. Voice, speed, models and language are configured on the server; arbitrary per-request model paths are not accepted. The default Kokoro output is 24 kHz. Static WAV responses are sent after synthesis completes.
+
+### Stream synthesized audio
+
+```sh
+curl -N http://127.0.0.1:8000/v1/audio/synthesize \
+  -H 'Content-Type: application/json' \
+  -d '{"text":"Hello. This is another sentence.","stream":true}'
+```
+
+The response is `application/x-ndjson`, using the existing adapter's streaming transport rather than WebSockets:
+
+```json
+{"type":"audio","format":"pcm_s16le","sample_rate":24000,"channels":1,"audio":"BASE64_PCM_BYTES"}
+{"type":"audio","format":"pcm_s16le","sample_rate":24000,"channels":1,"audio":"BASE64_PCM_BYTES"}
+{"type":"done"}
+```
+
+Base64-decode `audio` as signed 16-bit little-endian mono samples, normalize by 32768 for Web Audio, and schedule chunks consecutively at `sample_rate`. Events contain at most 32 KiB of raw PCM. JSON validation/model errors before the first chunk use HTTP errors. After HTTP 200, failures end with `{"type":"error","error":"..."}` instead of `done`; discard any pending frontend playback when cancellation is requested. A detected streaming disconnect closes the generator and releases the worker. Disconnects before any socket write cannot be detected immediately; use the explicit cancellation endpoint for those operations.
+
+```sh
+curl http://127.0.0.1:8000/v1/audio/cancel \
+  -H 'Content-Type: application/json' -d '{}'
+```
+
+Nonstreaming cancelled requests return 409. Streaming cancellation produces a final error event if the connection remains open. `/v1/cancel` now requests cancellation of both active text and audio work. Server shutdown cancels and releases speech resources. Audio errors do not invalidate successful text generation or session history.
+
+### Local browser/native clients
+
+Browser origins remain rejected unless explicitly listed with repeatable `--allow-origin` flags (or `allowed_origins=("http://localhost:5173",)` programmatically). Only exact HTTP/HTTPS loopback origins are accepted; no wildcard or remote-site origins. Preflight OPTIONS supports Content-Type and Authorization. Actual requests still enforce the existing local Host and Bearer token checks. Native clients or a frontend's backend can omit Origin.
+
+```javascript
+const response = await fetch('http://127.0.0.1:8000/v1/audio/synthesize', {
+  method: 'POST',
+  headers: {'Content-Type': 'application/json'}, // Add Authorization when configured.
+  body: JSON.stringify({text: 'Hello from Mica.'}),
+});
+if (!response.ok) throw new Error(await response.text());
+const context = new AudioContext();
+const buffer = await context.decodeAudioData(await response.arrayBuffer());
+const source = context.createBufferSource();
+source.buffer = buffer;
+source.connect(context.destination);
+source.start();
+```
+
+Configure an allowed origin matching your frontend's actual scheme/host/port. Have the frontend own audio permission prompts and cancellation of its playback queue. No new HTTP framework or WebSocket dependency is required. Automated tests use fake speech adapters to cover WAV conversion, binary/streaming responses, request validation, busy/cancel/recovery behavior, origin/auth rules and cleanup; actual models require prepared assets.
+
+Repeat the real offline audio roundtrip (Kokoro synthesis → WAV HTTP upload → Whisper transcription, plus streamed synthesis) with `uv run --locked --extra voice python scripts/audio_api_smoke.py`. It uses staged defaults and opens no microphone or speaker devices.

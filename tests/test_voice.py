@@ -416,3 +416,15 @@ def test_cli_interrupt_after_first_sentence_stops_future_speech(monkeypatch, tmp
         args=["--io-mode", "voice"], pieces=["First. ", "Never spoken."], between_pieces=between)
     assert adapter.spoken == ["First."]
     assert Conversation.load(saved).messages[-1]["incomplete"] is True
+
+
+def test_idle_worker_shutdown_exits_without_termination():
+    events = []
+    alive = iter([True, False])
+    speech = LocalSpeech.__new__(LocalSpeech)
+    speech.process = SimpleNamespace(pid=123, is_alive=lambda: next(alive),
+        join=lambda **kw: events.append("join"), close=lambda: events.append("process-close"),
+        terminate=lambda: pytest.fail("Idle worker should exit normally"))
+    speech.connection = SimpleNamespace(send=lambda message: events.append(message), close=lambda: events.append("pipe-close"))
+    speech.shutdown()
+    assert events == [("close", None), "join", "process-close", "pipe-close"]
