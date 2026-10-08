@@ -172,8 +172,55 @@ uv run --locked --extra voice python -m mica.api \
 | POST | `/v1/audio/synthesize` | JSON `{"text":"Hello"}` | Mono PCM16 `audio/wav` |
 | POST | `/v1/audio/synthesize` | JSON `{"text":"Hello", "stream":true}` | NDJSON audio chunks, then `done` |
 | POST | `/v1/audio/cancel` | JSON `{}` | JSON `{"cancel_requested":true|false}` |
+| POST | `/v1/voice/chat` | JSON `{"text":"What the user spoke"}` | Assistant text and Base64 WAV in one JSON response |
 
-`/health` includes `audio_enabled`. Disabled audio endpoints return 503 with setup instructions. Audio requests do not create sessions or modify conversation history. To generate a voice reply, transcribe, submit the resulting text to `/v1/generate`, then synthesize its response (or have your frontend submit sentence chunks as it receives text). Speech requests are serialized independently of text generation, allowing local LLM and speech inference to overlap while sharing GPU resources. Concurrent audio requests receive 503 rather than being queued.
+`/health` includes `audio_enabled`. Disabled audio endpoints return 503 with setup instructions. Transcription and synthesis do not modify conversation history. `/v1/voice/chat` runs the complete text-to-answer-to-speech flow on the backend and supports conversation sessions. Speech requests are serialized independently of text generation, allowing local LLM and speech inference to overlap while sharing GPU resources. Concurrent audio requests receive 503 rather than being queued.
+
+### Voice chat: user text → Mica answer → audio
+
+Send the user's words (from frontend speech recognition or typed input). The backend generates an answer with Mica MLX, synthesizes that answer, and returns both in one response:
+
+```sh
+curl --fail-with-body http://127.0.0.1:8000/v1/voice/chat \
+  -H 'Content-Type: application/json' \
+  -d '{"text":"Explain MLX in one sentence.","options":{"max_tokens":80}}'
+```
+
+```json
+{"text":"MLX is ...","model":"...","session_id":null,"stats":{},"incomplete":false,"audio":{"format":"wav","mime_type":"audio/wav","encoding":"base64","data":"BASE64_WAV_BYTES"}}
+```
+
+Optional `session_id` and `options` work as on `/v1/generate`. Use `/v1/sessions` to create a conversation first. The frontend displays `text`, decodes `audio.data` as a complete WAV, and plays it. It does not call `/v1/generate` or `/v1/audio/synthesize` separately. If the frontend sends raw recorded audio, first obtain text through `/v1/audio/transcribe`, then send that text to `/v1/voice/chat`.
+
+```javascript
+// Call from a user interaction so browser audio playback is permitted.
+async function voiceReply(userText, sessionId) {
+  const context = new AudioContext();
+  await context.resume();
+  try {
+    const response = await fetch('http://127.0.0.1:8000/v1/voice/chat', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'}, // Add Bearer token if configured.
+      body: JSON.stringify({text: userText, ...(sessionId ? {session_id: sessionId} : {}),
+                            options: {max_tokens: 128}}),
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error);
+    const bytes = Uint8Array.from(atob(result.audio.data), c => c.charCodeAt(0));
+    const source = context.createBufferSource();
+    source.buffer = await context.decodeAudioData(bytes.buffer);
+    source.connect(context.destination);
+    source.onended = () => context.close();
+    source.start();
+    return result.text;
+  } catch (error) {
+    await context.close();
+    throw error;
+  }
+}
+```
+
+This route returns after generation and synthesis finish; it does not accept `stream`. `/v1/cancel` cancels whichever stage is active; cancelled generation is not synthesized and returns 409. A synthesis failure returns an HTTP error; a successful generated turn remains in session history even if speech fails. Existing synthesis text/audio limits apply to the generated answer, so use short answers and bounded `max_tokens`. The independent streaming endpoints remain available for frontends that need incremental output.
 
 ### Transcribe WAV
 

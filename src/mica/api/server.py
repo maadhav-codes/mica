@@ -179,6 +179,8 @@ class Handler(BaseHTTPRequestHandler):
                     self._json(200, {"cancel_requested": self._audio().cancel()})
                 elif path == "/v1/audio/synthesize":
                     self._synthesize(body)
+                elif path == "/v1/voice/chat":
+                    self._voice_chat(body)
                 elif path == "/v1/generate":
                     self._generate(body)
                 else:
@@ -211,6 +213,23 @@ class Handler(BaseHTTPRequestHandler):
         from .audio import MAX_AUDIO_BYTES
         text = audio.transcribe(self._raw_body(MAX_AUDIO_BYTES))
         self._json(200, {"text": text})
+
+    def _voice_chat(self, body):
+        self._fields(body, {"text", "session_id", "options"})
+        audio = self._audio()
+        text = body.get("text")
+        if not isinstance(text, str) or not text.strip():
+            raise RequestError("text must be a nonempty string.")
+        session = self._session(body["session_id"]) if "session_id" in body else None
+        result = self.server.backend.generate(text, session=session, options=body.get("options"))
+        if result.incomplete:
+            raise RequestError("Voice reply generation cancelled; no audio was synthesized.", 409)
+        # Synthesize the assistant's answer, never the user's transcript.
+        wav = audio.wav(result.text)
+        self._json(200, {**result.to_dict(), "audio": {
+            "format": "wav", "mime_type": "audio/wav", "encoding": "base64",
+            "data": base64.b64encode(wav).decode("ascii"),
+        }})
 
     def _synthesize(self, body):
         self._fields(body, {"text", "stream"})

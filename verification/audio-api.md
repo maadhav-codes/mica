@@ -16,3 +16,12 @@ Validation on Python 3.12.13 / Apple M3:
 - `git diff --check` passed. CLI help exposes `--voice` and repeatable `--allow-origin`.
 
 Real microphone/speaker use, browser playback, and real-inference cancellation were not exercised by this check. Transport tests use fake speech adapters for deterministic cancellation/error coverage. WAV PCM16 is the supported upload format; MediaRecorder WebM/Opus, multipart uploads, arbitrary file paths and WebSockets are not provided.
+
+## Combined voice chat
+
+`POST /v1/voice/chat` accepts user text with optional session/options, runs the existing MLX backend and synthesizes the assistant answer. It returns generation metadata and a Base64 WAV in one JSON response after both stages complete. It requires `--voice`; partial/cancelled generation is not spoken. No dependencies were added.
+
+- Python **3.12.13** full suite: **160 passed in 23.49s**, including combined response decoding, session/options forwarding, validation before inference, disabled audio, cancelled generation and synthesis failure.
+- Real offline `scripts/audio_api_smoke.py` verified the combined route with staged Llama/Kokoro models: user text “Say hello in one short sentence.” produced assistant text “Hello.” and a valid **64,844-byte** mono PCM16 WAV.
+- The same smoke run retained the Whisper roundtrip and three streaming audio chunks from the earlier checks. It opened no microphone or speaker devices.
+- Native MLX/loopback tests were run with sandbox approval after restricted execution failed. Browser playback remains a manual check.

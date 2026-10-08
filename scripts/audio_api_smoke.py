@@ -3,6 +3,7 @@
 Run: uv run --locked --extra voice python scripts/audio_api_smoke.py
 """
 from io import BytesIO
+import base64
 import json
 from threading import Thread
 from urllib.request import Request, urlopen
@@ -34,7 +35,15 @@ def main():
             with urlopen(request, timeout=90) as response:
                 events = [json.loads(line) for line in response]
             assert events[0]["type"] == "audio" and events[-1]["type"] == "done"
-            print(json.dumps({"wav_bytes": len(data), "duration_seconds": duration, "transcript": transcript, "streamed_chunks": len(events)-1}))
+            request = Request(base+"/v1/voice/chat", data=json.dumps({"text": "Say hello in one short sentence.", "options": {"max_tokens": 40, "temperature": 0}}).encode(), headers={"Content-Type": "application/json"})
+            with urlopen(request, timeout=120) as response:
+                reply = json.load(response)
+            assert reply["text"].strip() and not reply["incomplete"]
+            reply_wav = base64.b64decode(reply["audio"]["data"], validate=True)
+            with wave.open(BytesIO(reply_wav), "rb") as wav:
+                assert wav.getnchannels() == 1 and wav.getsampwidth() == 2 and wav.getnframes() > 0
+            print(json.dumps({"wav_bytes": len(data), "duration_seconds": duration, "transcript": transcript, "streamed_chunks": len(events)-1,
+                              "voice_reply": reply["text"], "voice_reply_wav_bytes": len(reply_wav)}))
         finally:
             server.shutdown()
             server.server_close()

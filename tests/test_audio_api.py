@@ -12,6 +12,7 @@ import pytest
 
 from mica.api.audio import AudioService, MAX_AUDIO_BYTES, decode_wav
 from mica.api.server import MicaHTTPServer
+from mica.api.client import GenerationResult
 from mica.config import ChatError
 
 
@@ -215,3 +216,63 @@ def test_idle_service_shutdown_uses_graceful_worker_cleanup():
     assert service.wav("hello")
     service.close()
     assert events == ["graceful"] and service.closed and service.speech is None
+
+
+def test_voice_chat_generates_answer_and_returns_text_and_wav(audio_http):
+    base, server, fake = audio_http
+    calls = []
+    session = SimpleNamespace(id="conversation")
+    server.sessions[session.id] = session
+    def generate(text, **kwargs):
+        calls.append((text, kwargs))
+        return GenerationResult("**Assistant answer.**", "fake", session.id, {"tokens": 3})
+    server.backend.generate = generate
+    with request(base, "/v1/voice/chat", {"text": "What I spoke", "session_id": session.id,
+                 "options": {"max_tokens": 64}}) as response:
+        payload = json.load(response)
+    assert calls == [("What I spoke", {"session": session, "options": {"max_tokens": 64}})]
+    assert payload["text"] == "**Assistant answer.**" and not payload["incomplete"]
+    assert payload["session_id"] == session.id and payload["stats"] == {"tokens": 3}
+    assert fake.spoken == ["Assistant answer."]
+    assert payload["audio"]["mime_type"] == "audio/wav"
+    assert payload["audio"]["encoding"] == "base64" and payload["audio"]["format"] == "wav"
+    with wave.open(BytesIO(base64.b64decode(payload["audio"]["data"])), "rb") as wav:
+        assert wav.getnframes() == 4 and wav.getframerate() == 24000
+
+
+@pytest.mark.parametrize("body,status", [({}, 400), ({"text": " "}, 400),
+    ({"text": 42}, 400), ({"text": "hi", "stream": True}, 400),
+    ({"text": "hi", "session_id": "missing"}, 404)])
+def test_voice_chat_validates_before_generation(audio_http, body, status):
+    base, server, fake = audio_http
+    server.backend.generate = lambda *args, **kwargs: pytest.fail("Unexpected generation")
+    with pytest.raises(HTTPError) as exc:
+        request(base, "/v1/voice/chat", body)
+    assert exc.value.code == status and not fake.spoken
+
+
+def test_voice_chat_cancelled_generation_is_not_spoken(audio_http):
+    base, server, fake = audio_http
+    server.backend.generate = lambda *args, **kwargs: GenerationResult("partial", "fake", None, {}, True)
+    with pytest.raises(HTTPError) as exc:
+        request(base, "/v1/voice/chat", {"text": "hello"})
+    assert exc.value.code == 409 and not fake.spoken
+
+
+def test_voice_chat_synthesis_failure_returns_no_success(audio_http):
+    base, server, fake = audio_http
+    server.backend.generate = lambda *args, **kwargs: GenerationResult("answer", "fake", None, {})
+    fake.fail = True
+    with pytest.raises(HTTPError) as exc:
+        request(base, "/v1/voice/chat", {"text": "hello"})
+    assert exc.value.code == 500 and "synthesis failed" in json.load(exc.value)["error"]
+
+
+def test_voice_chat_requires_audio_enabled_before_generation(audio_http):
+    base, server, fake = audio_http
+    server.audio.close()
+    server.audio = None
+    server.backend.generate = lambda *args, **kwargs: pytest.fail("Unexpected generation")
+    with pytest.raises(HTTPError) as exc:
+        request(base, "/v1/voice/chat", {"text": "hi"})
+    assert exc.value.code == 503
