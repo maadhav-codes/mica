@@ -2,7 +2,7 @@
 
 **Mica — Local conversations, powered by MLX.**
 
-A local conversation tool with a CLI and a [backend API](src/mica/api/README.md) for native arm64 Python 3.11 on macOS Apple Silicon. Inference uses MLX-LM exclusively. Use it directly from Python or opt into its localhost HTTP adapter. No server runs by default, and there are no background daemons, telemetry, conversation uploads, conversion, or alternative inference backends.
+A local conversation tool with a CLI and a [backend API](src/mica/api/README.md) for native arm64 Python 3.12 on macOS Apple Silicon. Inference uses MLX-LM exclusively. Use it directly from Python or opt into its localhost HTTP adapter. No server runs by default, and there are no background daemons, telemetry, conversation uploads, conversion, or alternative inference backends.
 
 ## Use as a backend
 
@@ -21,12 +21,12 @@ For HTTP access, run `uv run python -m mica.api --model mlx-community/Llama-3.2-
 Install [uv](https://docs.astral.sh/uv/getting-started/installation/) if needed, then run from this directory in a native terminal:
 
 ```sh
-uv python install 3.11
-uv sync --locked --python 3.11 --group dev
+uv python install 3.12
+uv sync --locked --python 3.12 --group dev
 uv run mica doctor
 ```
 
-`uv sync` creates the project `.venv`. `uv.lock` pins the complete dependency graph and distribution hashes. The tested inference releases are MLX 0.32.3 and MLX-LM 0.32.0; Python is 3.11.15. For a runtime-only installation use `uv sync --locked --no-dev`. No dependency installation uses pip.
+`uv sync` creates the project `.venv`. `uv.lock` pins the complete dependency graph and distribution hashes. The tested inference releases are MLX 0.32.3 and MLX-LM 0.32.0; Python is 3.12.13. For a runtime-only installation use `uv sync --locked --no-dev`. No dependency installation uses pip.
 
 Activation is optional:
 
@@ -37,7 +37,7 @@ mica --help
 
 Use `uv run --locked ...` without activation. Once installed, use `.venv/bin/mica` or the activated entry point to avoid uv's dependency checks when working without an internet connection. If using uv itself offline, use `uv run --offline --locked mica ...` in addition to the application's `--offline` flag.
 
-Intel, Linux, Rosetta, macOS before 14, and Python versions other than 3.11 are rejected. Metal must be available in the executing process. macOS sandbox/headless environments may prevent GPU access even on supported hardware; `doctor` explains import failures.
+Intel, Linux, Rosetta, macOS before 14, and Python versions other than 3.12 are rejected. Metal must be available in the executing process. macOS sandbox/headless environments may prevent GPU access even on supported hardware; `doctor` explains import failures.
 
 ## Select and download a model
 

@@ -4,7 +4,7 @@ Use Mica directly from Python, or run its optional localhost HTTP adapter. Both 
 
 ## Python integration
 
-Install the project with `uv sync --locked`. In your own uv project, add this checkout with `uv add /absolute/path/to/mica`. Run on native arm64 Python 3.11 on macOS 14+ with Metal access. Download a selected model once, then use the API offline:
+Install the project with `uv sync --locked`. In your own uv project, add this checkout with `uv add /absolute/path/to/mica`. Run on native arm64 Python 3.12 on macOS 14+ with Metal access. Download a selected model once, then use the API offline:
 
 ```python
 from mica.api import Mica, Settings

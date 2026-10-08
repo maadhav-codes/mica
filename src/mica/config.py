@@ -15,15 +15,15 @@ class ChatError(Exception):
 
 def check_platform():
     if platform.system() != "Darwin":
-        raise ChatError("Requires macOS Apple Silicon with native arm64 Python 3.11.")
+        raise ChatError("Requires macOS Apple Silicon with native arm64 Python 3.12.")
     translated = subprocess.run(["sysctl", "-in", "sysctl.proc_translated"], capture_output=True, text=True)
     if translated.stdout.strip() == "1" or platform.machine() != "arm64":
-        raise ChatError("Intel/Rosetta execution is unsupported. Open a native terminal and install arm64 Python 3.11 with uv.")
+        raise ChatError("Intel/Rosetta execution is unsupported. Open a native terminal and install arm64 Python 3.12 with uv.")
     mac_version = platform.mac_ver()[0]
     if not mac_version or int(mac_version.split(".")[0]) < 14:
         raise ChatError("The locked MLX releases require macOS 14 or later. Upgrade macOS before installing.")
-    if sys.version_info[:2] != (3, 11):
-        raise ChatError("Use native Python 3.11: uv sync --python 3.11")
+    if sys.version_info[:2] != (3, 12):
+        raise ChatError("Use native Python 3.12: uv sync --python 3.12")
 
 
 def home() -> Path:

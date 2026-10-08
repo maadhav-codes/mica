@@ -73,6 +73,21 @@ def test_platform_rejections(monkeypatch):
         check_platform()
 
 
+@pytest.mark.parametrize("python_version", [(3, 11, 15), (3, 12, 13), (3, 13, 0)])
+def test_platform_requires_python_312(monkeypatch, python_version):
+    import mica.config as config
+    monkeypatch.setattr(config.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(config.platform, "machine", lambda: "arm64")
+    monkeypatch.setattr(config.platform, "mac_ver", lambda: ("15.8.1", (), ""))
+    monkeypatch.setattr(config.subprocess, "run", lambda *a, **kw: SimpleNamespace(stdout="0"))
+    monkeypatch.setattr(config.sys, "version_info", python_version)
+    if python_version[:2] == (3, 12):
+        check_platform()
+    else:
+        with pytest.raises(ChatError, match="Python 3.12"):
+            check_platform()
+
+
 def test_budget_counts_template_and_trims_pairs():
     s = Settings(system="S", context_budget=40, max_tokens=10)
     c = Conversation("m", s, [{"role": "user", "content": "123456"}, {"role": "assistant", "content": "abcdef"}])

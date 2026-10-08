@@ -1,5 +1,20 @@
 # Actual verification results — 8 October 2026
 
+## Python 3.12 migration
+
+The project now requires Python 3.12 only (`>=3.12,<3.13`), with `.python-version` set to `3.12` and matching runtime checks. Verified on native arm64 Python 3.12.13:
+
+- `uv sync --locked --python 3.12 --group dev` completed successfully.
+- `uv run --locked --python 3.12 pytest -q`: **83 passed**.
+- `uv lock --check --offline` passed. Dependency versions remain unchanged; the lockfile now selects Python 3.12 distributions.
+- `mica doctor` with `MICA_HOME=/tmp/mica-python312-doctor` passed and reported Apple M3 Metal access.
+
+The default doctor invocation reached the Python/dependency/Metal checks successfully, then rejected an existing saved `voice` setting unsupported by this checkout. Saved user settings were not changed. The current checkout does not include the earlier voice implementation. Model generation and benchmarks were not rerun during this migration.
+
+The results below are historical Python 3.11 measurements, not Python 3.12 benchmark results. The current lockfile reflects the migrated Python 3.12 environment.
+
+## Prior verification environment
+
 Host: Apple M3, 16 GiB unified memory, macOS 15.8.1, native arm64 Python 3.11.15. Installed using uv 0.10.9 and project-local `.venv`; exact packages and hashes are in `uv.lock`.
 
 Tested direct runtime versions: MLX 0.32.3, MLX-LM 0.32.0, huggingface-hub 1.33.0, typer 0.27.3, rich 15.0.0, prompt-toolkit 3.0.53. pytest 9.1.1 is a development dependency.
